@@ -1,11 +1,14 @@
 [programs.localnet]
-nm_offer = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+nm_offer = "8SiHwRFc5nJ9QjvWvDGvtQqteBCNTT1s1DMw7mAzE3Cv"
+
+[programs.devnet]
+nm_offer = "8SiHwRFc5nJ9QjvWvDGvtQqteBCNTT1s1DMw7mAzE3Cv"
 
 [registry]
 url = "https://anchor.projectserum.com"
 
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "/root/.config/solana/id.json"
 
 [scripts]

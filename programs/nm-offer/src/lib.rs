@@ -2,8 +2,14 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, CloseAccount, Mint, SetAuthority, TokenAccount, Transfer};
 use spl_token::{ instruction::AuthorityType};
 
+pub mod account;
+pub mod constants;
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+use account::*;
+use constants::*;
+
+
+declare_id!("8SiHwRFc5nJ9QjvWvDGvtQqteBCNTT1s1DMw7mAzE3Cv");
 
 
 
@@ -21,68 +27,62 @@ pub mod nm_offer {
         Ok(())
     }
 
-    pub fn add_offer(
-        ctx : Context<AddOffer>,
+    pub fn init_offer_data(
+        ctx : Context<InitOfferData>,
         offer_amount_sol: u64,
         offer_nft_price: u64,
         listed_price: u64,
         ) -> ProgramResult {
-        msg!("Add offer");
+        msg!("Init offer data");
 
         let pool = &ctx.accounts.pool;
 
-        let offer_data = &mut ctx.accounts.offer_data;
-        offer_data.offerer = *ctx.accounts.owner.key;
+        let mut offer_data = ctx.accounts.offer_data.load_mut()?;
+        offer_data.offeror = *ctx.accounts.offeror.key;
         offer_data.pool = pool.key();
 
         offer_data.listed_nft_mint = *ctx.accounts.listed_nft_mint.key;
         offer_data.listed_nft_account = *ctx.accounts.listed_nft_account.key;
 
-        offer_data.offer_amount_sol = offer_amount_sol;
-        offer_data.offer_nft_price = offer_nft_price;
-
-        offer_data.offer_nft_mint = *ctx.accounts.offer_nft_mint.key;
-        offer_data.offer_nft_account = *ctx.accounts.offer_nft_account.key;
+        let offer_item = OfferItem {
+            offer_amount_sol: offer_amount_sol,
+            offer_nft_price: offer_nft_price,
+            offer_nft_mint: *ctx.accounts.offer_nft_mint.key,
+            offer_nft_account: *ctx.accounts.offer_nft_account.key,
+        };
+        offer_data.add_offer_item(offer_item);
 
         offer_data.listed_price = listed_price;
 
         Ok(())
     }
 
-    pub fn update_offer(
-        ctx : Context<UpdateOffer>,
+    pub fn add_offer(
+        ctx : Context<AddOffer>,
         offer_amount_sol: u64,
         offer_nft_price: u64,
         ) -> ProgramResult {
-        msg!("Update offer");
+        msg!("Add offer");
 
         let pool = &ctx.accounts.pool;
-        let last_offer_data = &mut ctx.accounts.last_offer_data;
-        if last_offer_data.pool != pool.key() {
+        let mut offer_data = ctx.accounts.offer_data.load_mut()?;
+        if offer_data.pool != pool.key() {
             msg!("Not match owner");
             return Err(PoolError::InvalidPoolAccount.into());
         }
 
-        let cur_offer_price = offer_amount_sol + offer_nft_price;
-        let last_offer_price = last_offer_data.offer_amount_sol + last_offer_data.offer_nft_price;
-
-        if cur_offer_price > last_offer_price {
-            last_offer_data.offerer = *ctx.accounts.owner.key;
-            last_offer_data.pool = pool.key();
-
-            last_offer_data.listed_nft_mint = *ctx.accounts.listed_nft_mint.key;
-            last_offer_data.listed_nft_account = *ctx.accounts.listed_nft_account.key;
-
-            last_offer_data.offer_amount_sol = offer_amount_sol;
-            last_offer_data.offer_nft_price = offer_nft_price;
-
-            last_offer_data.offer_nft_mint = *ctx.accounts.offer_nft_mint.key;
-            last_offer_data.offer_nft_account = *ctx.accounts.offer_nft_account.key;
+        if offer_data.offer_item_count < MAX_OFFER_COUNT as u64 {
+            let offer_item = OfferItem {
+                offer_amount_sol: offer_amount_sol,
+                offer_nft_price: offer_nft_price,
+                offer_nft_mint: *ctx.accounts.offer_nft_mint.key,
+                offer_nft_account: *ctx.accounts.offer_nft_account.key,
+            };
+            offer_data.add_offer_item(offer_item);
         }
 
         Ok(())
     }
-
 }
 
 #[account]
@@ -107,34 +107,15 @@ pub struct Initialize<'info> {
     system_program : Program<'info,System>,
 }
 
-pub const OFFERDATA_SIZE : usize = 32 + 32 + 32 + 32 + 8 + 8 + 32 + 32 + 8;
-
-#[account]
-pub struct OfferData {
-    pub offerer: Pubkey,
-    pub pool : Pubkey,
-    pub listed_nft_mint: Pubkey,
-    pub listed_nft_account: Pubkey,
-
-    pub offer_amount_sol: u64,
-    pub offer_nft_price: u64, // sol unit
-
-    pub offer_nft_mint: Pubkey,
-    pub offer_nft_account: Pubkey,
-
-    pub listed_price: u64, // sol unit
-}
-
-
 #[derive(Accounts)]
-pub struct AddOffer<'info> {
+pub struct InitOfferData<'info> {
     #[account(mut, signer)]
-    owner : AccountInfo<'info>, 
+    offeror : AccountInfo<'info>, 
 
     pool : Account<'info, Pool>,
 
-    #[account(init, payer=owner, space = 8 + OFFERDATA_SIZE)]
-    offer_data : Account<'info, OfferData>,
+    #[account(init, payer=offeror, space = 8 + OFFERDATA_SIZE)]
+    offer_data : AccountLoader<'info, OfferData>,
 
     // offer infos start------------
     #[account(mut,owner=spl_token::id())]
@@ -155,14 +136,14 @@ pub struct AddOffer<'info> {
 
 
 #[derive(Accounts)]
-pub struct UpdateOffer<'info> {
+pub struct AddOffer<'info> {
     #[account(mut, signer)]
     owner : AccountInfo<'info>, 
 
-    pool : Account<'info,Pool>,
+    pool : Account<'info, Pool>,
 
     #[account(mut)]
-    last_offer_data : Account<'info, OfferData>,
+    offer_data : AccountLoader<'info, OfferData>,
 
     // offer infos start------------
     #[account(mut,owner=spl_token::id())]
