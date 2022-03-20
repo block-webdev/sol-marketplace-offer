@@ -27,58 +27,43 @@ pub mod nm_offer {
         Ok(())
     }
 
-    pub fn init_offer_data(
-        ctx : Context<InitOfferData>,
+    pub fn add_offer(
+        ctx : Context<AddOffer>,
+        collection_id: u32,
+        nft_id: u32,
         offer_amount_sol: u64,
         offer_nft_price: u64,
         listed_price: u64,
+        floor_price: u64,
+        offer_nft_mint: [Pubkey; 5],    // BUY_MAX_NFT_COUNT
+        offer_nft_account: [Pubkey; 5], // BUY_MAX_NFT_COUNT
+        offer_nft_count: u8,
         ) -> ProgramResult {
-        msg!("Init offer data");
+        msg!("Add offer data");
 
-        let pool = &ctx.accounts.pool;
+        let offer_data = &mut ctx.accounts.offer_data;
+        if offer_data.offer_item_count < MAX_OFFER_COUNT as u8 {
+            if offer_nft_count != 0 || offer_amount_sol >= floor_price {
+                let pool = &ctx.accounts.pool;
 
-        let mut offer_data = ctx.accounts.offer_data.load_mut()?;
-        offer_data.offeror = *ctx.accounts.offeror.key;
-        offer_data.pool = pool.key();
+                offer_data.collection_id = collection_id;
+                offer_data.nft_id = nft_id;
 
-        offer_data.listed_nft_mint = *ctx.accounts.listed_nft_mint.key;
-        offer_data.listed_nft_account = *ctx.accounts.listed_nft_account.key;
+                offer_data.offeror = *ctx.accounts.offeror.key;
+                offer_data.pool = pool.key();
 
-        let offer_item = OfferItem {
-            offer_amount_sol: offer_amount_sol,
-            offer_nft_price: offer_nft_price,
-            offer_nft_mint: *ctx.accounts.offer_nft_mint.key,
-            offer_nft_account: *ctx.accounts.offer_nft_account.key,
-        };
-        offer_data.add_offer_item(offer_item);
+                let offer_item = OfferItem {
+                    offer_amount_sol: offer_amount_sol,
+                    offer_nft_price: offer_nft_price,
+                    offer_nft_mint: offer_nft_mint,
+                    offer_nft_account: offer_nft_account,
+                    offer_nft_count: offer_nft_count,
+                };
+                offer_data.add_offer_item(offer_item);
 
-        offer_data.listed_price = listed_price;
-
-        Ok(())
-    }
-
-    pub fn add_offer(
-        ctx : Context<AddOffer>,
-        offer_amount_sol: u64,
-        offer_nft_price: u64,
-        ) -> ProgramResult {
-        msg!("Add offer");
-
-        let pool = &ctx.accounts.pool;
-        let mut offer_data = ctx.accounts.offer_data.load_mut()?;
-        if offer_data.pool != pool.key() {
-            msg!("Not match owner");
-            return Err(PoolError::InvalidPoolAccount.into());
-        }
-
-        if offer_data.offer_item_count < MAX_OFFER_COUNT as u64 {
-            let offer_item = OfferItem {
-                offer_amount_sol: offer_amount_sol,
-                offer_nft_price: offer_nft_price,
-                offer_nft_mint: *ctx.accounts.offer_nft_mint.key,
-                offer_nft_account: *ctx.accounts.offer_nft_account.key,
-            };
-            offer_data.add_offer_item(offer_item);
+                offer_data.listed_price = listed_price;
+                offer_data.floor_price = floor_price;
+            }
         }
 
         Ok(())
@@ -108,14 +93,14 @@ pub struct Initialize<'info> {
 }
 
 #[derive(Accounts)]
-pub struct InitOfferData<'info> {
+pub struct AddOffer<'info> {
     #[account(mut, signer)]
     offeror : AccountInfo<'info>, 
 
     pool : Account<'info, Pool>,
 
-    #[account(init, payer=offeror, space = 8 + OFFERDATA_SIZE)]
-    offer_data : AccountLoader<'info, OfferData>,
+    #[account(init_if_needed, payer=offeror, space = 8 + OFFERDATA_SIZE)]
+    offer_data : Account<'info, OfferData>,
 
     // offer infos start------------
     #[account(mut,owner=spl_token::id())]
@@ -132,66 +117,4 @@ pub struct InitOfferData<'info> {
     // end ------------
 
     system_program : Program<'info,System>,
-}
-
-
-#[derive(Accounts)]
-pub struct AddOffer<'info> {
-    #[account(mut, signer)]
-    owner : AccountInfo<'info>, 
-
-    pool : Account<'info, Pool>,
-
-    #[account(mut)]
-    offer_data : AccountLoader<'info, OfferData>,
-
-    // offer infos start------------
-    #[account(mut,owner=spl_token::id())]
-    listed_nft_mint : AccountInfo<'info>, 
-
-    #[account(mut,owner=spl_token::id())]
-    listed_nft_account : AccountInfo<'info>, 
-
-    #[account(mut,owner=spl_token::id())]
-    offer_nft_mint : AccountInfo<'info>, 
-
-    #[account(mut,owner=spl_token::id())]
-    offer_nft_account : AccountInfo<'info>, 
-    // end ------------
-
-    system_program : Program<'info,System>,
-}
-
-
-#[error]
-pub enum PoolError {
-    #[msg("Token mint to failed")]
-    TokenMintToFailed,
-
-    #[msg("Token set authority failed")]
-    TokenSetAuthorityFailed,
-
-    #[msg("Token transfer failed")]
-    TokenTransferFailed,
-
-    #[msg("Invalid token account")]
-    InvalidTokenAccount,
-
-    #[msg("Invalid token mint")]
-    InvalidTokenMint,
-
-    #[msg("Invalid metadata")]
-    InvalidMetadata,
-
-    #[msg("Invalid pool account")]
-    InvalidPoolAccount,
-
-    #[msg("Invalid time")]
-    InvalidTime,
-
-    #[msg("Invalid Period")]
-    InvalidPeriod,
-
-    #[msg("Already unstaked")]
-    AlreadyUnstaked,
 }
