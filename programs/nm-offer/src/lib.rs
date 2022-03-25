@@ -68,6 +68,20 @@ pub mod nm_offer {
 
         Ok(())
     }
+
+    pub fn accept_offer (ctx : Context<DealOffer>, offer_index: u8) -> ProgramResult {
+        let offer_data = &mut ctx.accounts.offer_data;
+        offer_data.accept_offer_item(offer_index);
+
+        Ok(())
+    }
+
+    pub fn reject_offer (ctx : Context<DealOffer>, offer_index: u8) -> ProgramResult {
+        let offer_data = &mut ctx.accounts.offer_data;
+        offer_data.remove_offer_item(offer_index);
+
+        Ok(())
+    }
 }
 
 #[account]
@@ -117,4 +131,17 @@ pub struct AddOffer<'info> {
     // end ------------
 
     system_program : Program<'info,System>,
+}
+
+
+#[derive(Accounts)]
+pub struct DealOffer<'info> {
+    #[account(mut, signer)]
+    offeror : AccountInfo<'info>, 
+
+    pool : Account<'info, Pool>,
+
+    #[account(mut)]
+    offer_data : Account<'info, OfferData>,
+
 }

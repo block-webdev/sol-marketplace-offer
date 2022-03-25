@@ -74,4 +74,14 @@ impl OfferData {
         self.offer_items[self.offer_item_count as usize] = item;
         self.offer_item_count += 1;
     }
+
+    pub fn remove_offer_item(&mut self, item_index: u8) {
+        self.offer_items[item_index as usize] = self.offer_items[self.offer_item_count as usize - 1];
+        self.offer_item_count -= 1;
+    }
+
+    pub fn accept_offer_item(&mut self, item_index: u8) {
+        self.offer_items[0] = self.offer_items[item_index as usize];
+        self.offer_item_count = 1;
+    }
 }
