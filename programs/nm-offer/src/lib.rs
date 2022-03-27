@@ -82,6 +82,16 @@ pub mod nm_offer {
 
         Ok(())
     }
+
+    pub fn cancel_offer (ctx : Context<DealOffer>, offer_index: u8) -> ProgramResult {
+        let offer_data = &mut ctx.accounts.offer_data;
+        require!(offer_data.offeror == *ctx.accounts.offeror.key, OfferError::InvalidOwner);
+
+
+        offer_data.remove_offer_item(offer_index);
+
+        Ok(())
+    }
 }
 
 #[account]
@@ -144,4 +154,11 @@ pub struct DealOffer<'info> {
     #[account(mut)]
     offer_data : Account<'info, OfferData>,
 
+}
+
+
+#[error]
+pub enum OfferError {
+    #[msg("Invalid Owner")]
+    InvalidOwner,
 }
