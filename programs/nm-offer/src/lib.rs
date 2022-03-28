@@ -92,6 +92,36 @@ pub mod nm_offer {
 
         Ok(())
     }
+
+    
+    pub fn add_nft(
+        ctx : Context<AddNft>,
+        nft_addr: Pubkey,
+        owner: Pubkey,
+        collection_id: u32,
+        nft_id: u32,
+        pool: Pubkey,
+        ) -> ProgramResult {
+        msg!("Add nft data");
+
+        let nft_data = &mut ctx.accounts.nft_data;
+
+        nft_data.nft_addr = nft_addr;
+        nft_data.owner = owner;
+        nft_data.collection_id = collection_id;
+        nft_data.nft_id = nft_id;
+        nft_data.pool = pool;
+
+        Ok(())
+    }
+
+    pub fn remove_nft(
+        ctx : Context<RemoveNft>,
+        ) -> ProgramResult {
+        msg!("Remove nft data");
+
+        Ok(())
+    }
 }
 
 #[account]
@@ -158,7 +188,36 @@ pub struct DealOffer<'info> {
 
 
 #[error]
-pub enum OfferError {
+pub enum Offer  Error {
     #[msg("Invalid Owner")]
     InvalidOwner,
+}
+
+
+#[derive(Accounts)]
+pub struct AddNft<'info> {
+    #[account(mut, signer)]
+    owner : AccountInfo<'info>, 
+
+    pool : Account<'info, Pool>,
+
+    #[account(init_if_needed, payer=owner)]
+    nft_data : Account<'info, NftData>,
+
+    system_program : Program<'info,System>,
+}
+
+
+#[derive(Accounts)]
+pub struct RemoveNft<'info> {
+    #[account(mut, signer)]
+    owner : AccountInfo<'info>, 
+
+    pool : Account<'info, Pool>,
+
+    #[account(mut, close = receiver)]
+    nft_data : Account<'info, NftData>,
+
+    #[account(mut)]
+    pub receiver: SystemAccount<'info>
 }
