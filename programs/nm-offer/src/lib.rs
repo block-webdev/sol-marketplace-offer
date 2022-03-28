@@ -188,7 +188,7 @@ pub struct DealOffer<'info> {
 
 
 #[error]
-pub enum Offer  Error {
+pub enum OfferError {
     #[msg("Invalid Owner")]
     InvalidOwner,
 }
