@@ -1,12 +1,15 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, CloseAccount, Mint, SetAuthority, TokenAccount, Transfer};
+use anchor_spl::token::{self, CloseAccount, Mint, SetAuthority, TokenAccount, Transfer, Token};
 use spl_token::{ instruction::AuthorityType};
+use anchor_lang::solana_program::{program::invoke, system_instruction::transfer};
 
 pub mod account;
-pub mod constants;
+pub mod constant;
+pub mod error;
 
 use account::*;
-use constants::*;
+use constant::*;
+use error::*;
 
 
 declare_id!("8SiHwRFc5nJ9QjvWvDGvtQqteBCNTT1s1DMw7mAzE3Cv");
@@ -21,8 +24,15 @@ pub mod nm_offer {
 
         let pool = &mut ctx.accounts.pool;
         pool.owner = *ctx.accounts.owner.key;
-        pool.rand = *ctx.accounts.rand.key;
         pool.bump = _bump;
+
+        Ok(())
+    }
+
+    pub fn create_offerdata(ctx: Context<CreateOfferData>) -> ProgramResult {
+        let offer_data = &mut ctx.accounts.offer_data.load_init()?;
+
+        offer_data.pool = *ctx.accounts.pool.to_account_info().key;
 
         Ok(())
     }
@@ -41,7 +51,8 @@ pub mod nm_offer {
         ) -> ProgramResult {
         msg!("Add offer data");
 
-        let offer_data = &mut ctx.accounts.offer_data;
+        let offer_data = &mut ctx.accounts.offer_data.load_mut()?;
+
         if offer_data.offer_item_count < MAX_OFFER_COUNT as u8 {
             if offer_nft_count != 0 || offer_amount_sol >= floor_price {
                 let pool = &ctx.accounts.pool;
@@ -70,23 +81,22 @@ pub mod nm_offer {
     }
 
     pub fn accept_offer (ctx : Context<DealOffer>, offer_index: u8) -> ProgramResult {
-        let offer_data = &mut ctx.accounts.offer_data;
+        let offer_data = &mut ctx.accounts.offer_data.load_mut()?;
         offer_data.accept_offer_item(offer_index);
 
         Ok(())
     }
 
     pub fn reject_offer (ctx : Context<DealOffer>, offer_index: u8) -> ProgramResult {
-        let offer_data = &mut ctx.accounts.offer_data;
+        let offer_data = &mut ctx.accounts.offer_data.load_mut()?;
         offer_data.remove_offer_item(offer_index);
 
         Ok(())
     }
 
     pub fn cancel_offer (ctx : Context<DealOffer>, offer_index: u8) -> ProgramResult {
-        let offer_data = &mut ctx.accounts.offer_data;
-        require!(offer_data.offeror == *ctx.accounts.offeror.key, OfferError::InvalidOwner);
-
+        let offer_data = &mut ctx.accounts.offer_data.load_mut()?;
+        require!(offer_data.offeror == *ctx.accounts.offeror.key, NMError::InvalidOwner);
 
         offer_data.remove_offer_item(offer_index);
 
@@ -122,14 +132,92 @@ pub mod nm_offer {
 
         Ok(())
     }
-}
 
-#[account]
-#[derive(Default)]
-pub struct Pool {
-    pub owner : Pubkey,
-    pub rand : Pubkey,
-    pub bump : u8,
+    #[access_control(user(&ctx.accounts.nft_data, &ctx.accounts.source_account))]
+    pub fn buy_nft(
+        ctx: Context<BuyNftStep>,
+        global_bump: u8,
+        offer_index: u8,
+    ) -> ProgramResult {
+
+        let offer_data = &mut ctx.accounts.offer_data.load_mut()?;
+        require!(offer_index < offer_data.offer_item_count, NMError::OverflowOfferCount);
+
+        let pool = &mut ctx.accounts.pool;
+        let offer_item = offer_data.offer_items[offer_index as usize];
+
+        let account_length = ctx.remaining_accounts.len();
+        require!(account_length == offer_item.offer_nft_count as usize * 2, NMError::OverflowTokenAccountCount);
+
+        // check buying state
+        let buying_state = &mut ctx.accounts.buying_state;
+        if buying_state.paid_sol == false {
+            // if not paid in sol, pay in sol.
+            invoke(
+                &transfer(
+                    ctx.accounts.buyer.key,
+                    pool.to_account_info().key,
+                    offer_item.offer_amount_sol
+                ),
+                &[ctx.accounts.buyer.clone(),
+                pool.to_account_info().clone(),
+                ctx.accounts.system_program.to_account_info().clone()]
+            )?;
+            buying_state.paid_sol = true;
+        }
+
+        let source_account = &mut ctx.accounts.source_account;
+        let dest_account = &mut ctx.accounts.dest_account;
+
+        // check if source_account is paid
+        let found_idx_elem1 = offer_item.offer_nft_account.
+                                    iter().
+                                    position(|&x| x == *source_account.key ).
+                                    unwrap_or(offer_item.offer_nft_count as usize);
+
+        require!(found_idx_elem1 < offer_item.offer_nft_count as usize, NMError::InvalidSourceAccount);
+
+        let found_idx_elem2 = buying_state.paid_nft_account_list.
+                                    iter().
+                                    position(|&x| x == *source_account.key ).
+                                    unwrap_or(offer_item.offer_nft_count as usize);
+        if found_idx_elem2 == offer_item.offer_nft_count as usize {
+            // not found, not paid
+            let cpi_accounts = Transfer {
+                from: source_account.to_account_info(),
+                to: dest_account.to_account_info(),
+                authority: ctx.accounts.buyer.to_account_info(),
+            };
+            let transfer_ctx1 = CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
+            token::transfer(
+                transfer_ctx1,
+                1
+            )?;
+
+            buying_state.add_paid_nft(*source_account.key);
+
+            if buying_state.paid_nft_count == offer_item.offer_nft_count {
+                // paid finally
+                // withdraw to dest account
+
+                let seeds = &[GLOBAL_AUTHORITY_SEED.as_bytes(), &[global_bump]];
+                let signer = &[&seeds[..]];
+                let cpi_accounts1 = Transfer {
+                    from: dest_account.to_account_info(),
+                    to: source_account.to_account_info(),
+                    authority: ctx.accounts.pool.to_account_info()
+                };
+                let transfer_ctx2 = CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), cpi_accounts1, signer);
+                token::transfer(
+                    transfer_ctx2,
+                    1
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
 }
 
 #[derive(Accounts)]
@@ -138,12 +226,21 @@ pub struct Initialize<'info> {
     #[account(mut, signer)]
     owner : AccountInfo<'info>,
 
-    #[account(init, payer = owner, seeds = [(*rand.key).as_ref()], bump = _bump)]
+    #[account(init, payer = owner, seeds = [GLOBAL_AUTHORITY_SEED.as_ref()], bump = _bump)]
     pool : Account<'info, Pool>,
 
-    rand : AccountInfo<'info>,
-
     system_program : Program<'info,System>,
+}
+
+#[derive(Accounts)]
+pub struct CreateOfferData<'info> {
+    #[account(mut, signer)]
+    initializer : AccountInfo<'info>, 
+
+    pool : Account<'info, Pool>,
+
+    #[account(zero)]
+    offer_data : AccountLoader<'info, OfferData>,
 }
 
 #[derive(Accounts)]
@@ -153,8 +250,8 @@ pub struct AddOffer<'info> {
 
     pool : Account<'info, Pool>,
 
-    #[account(init_if_needed, payer=offeror, space = 8 + OFFERDATA_SIZE)]
-    offer_data : Account<'info, OfferData>,
+    #[account(mut)]
+    offer_data : AccountLoader<'info, OfferData>,
 
     // offer infos start------------
     #[account(mut,owner=spl_token::id())]
@@ -182,17 +279,9 @@ pub struct DealOffer<'info> {
     pool : Account<'info, Pool>,
 
     #[account(mut)]
-    offer_data : Account<'info, OfferData>,
+    offer_data : AccountLoader<'info, OfferData>,
 
 }
-
-
-#[error]
-pub enum OfferError {
-    #[msg("Invalid Owner")]
-    InvalidOwner,
-}
-
 
 #[derive(Accounts)]
 pub struct AddNft<'info> {
@@ -220,4 +309,44 @@ pub struct RemoveNft<'info> {
 
     #[account(mut)]
     pub receiver: SystemAccount<'info>
+}
+
+
+#[derive(Accounts)]
+#[instruction(_bump: u8)]
+pub struct BuyNftStep<'info> {
+    #[account(mut, signer)]
+    buyer : AccountInfo<'info>,
+
+    #[account(
+        mut,
+        seeds = [GLOBAL_AUTHORITY_SEED.as_ref()],
+        bump = _bump,
+    )]
+    pub pool: Account<'info, Pool>,
+
+    #[account(mut)]
+    buying_state : Account<'info, BuyingState>,
+
+    #[account(mut)]
+    offer_data : AccountLoader<'info, OfferData>,
+
+    source_account : AccountInfo<'info>,
+    dest_account : AccountInfo<'info>,
+
+    #[account(mut, close = receiver)]
+    nft_data : Account<'info, NftData>,
+
+    #[account(mut)]
+    pub receiver: SystemAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
+
+    system_program : Program<'info,System>,
+}
+
+// Access control modifiers
+fn user(nft_data: &Account<NftData>, user: &AccountInfo) -> Result<()> {
+    require!(nft_data.owner == *user.key, NMError::InvalidOwner);
+    Ok(())
 }

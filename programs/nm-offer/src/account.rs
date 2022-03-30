@@ -1,12 +1,21 @@
 use anchor_lang::prelude::*;
 
 
-use crate::constants::*;
+use crate::constant::*;
+
+
+
+#[account]
+#[derive(Default)]
+pub struct Pool {
+    pub owner : Pubkey,
+    pub bump : u8,
+}
 
 pub const OFFERITEM_SIZE : usize = 8 + 8 + (32 * BUY_MAX_NFT_COUNT) * 2 + 1;
 
-#[account]
-#[derive(Default, Copy)]
+#[zero_copy]
+#[derive(Default, AnchorSerialize, AnchorDeserialize)]
 pub struct OfferItem {
     pub offer_amount_sol: u64,
     pub offer_nft_price: u64, // sol unit
@@ -16,15 +25,14 @@ pub struct OfferItem {
     pub offer_nft_count: u8, // must be less than BUY_MAX_NFT_COUNT
 }
 
-pub const OFFERDATA_SIZE : usize = 4 + 4 + 32 + ((8 + OFFERITEM_SIZE) * MAX_OFFER_COUNT) + 1 + 32 + 8 + 8;
+pub const OFFERDATA_SIZE : usize = 4 + 4 + 32 + (OFFERITEM_SIZE * MAX_OFFER_COUNT) + 1 + 32 + 8 + 8;
 
-#[account]
+#[account(zero_copy)]
+#[repr(packed)]
 pub struct OfferData {
     // listed nft info for selling
     pub collection_id : u32,    // collection id containing nft
     pub nft_id : u32,   // nft id for selling
-    // pub listed_nft_mint: Pubkey,    // mint key
-    // pub listed_nft_account: Pubkey, // nft token account
 
     // public key of person sending offer.
     pub offeror: Pubkey,    // person sent offer
@@ -99,4 +107,19 @@ pub struct NftData {
 
     // pool info
     pub pool : Pubkey,
+}
+
+#[account]
+#[derive(Default)]
+pub struct BuyingState {
+    pub paid_sol : bool,
+    pub paid_nft_count : u8,
+    pub paid_nft_account_list: [Pubkey; BUY_MAX_NFT_COUNT],
+}
+
+impl BuyingState {
+    pub fn add_paid_nft(&mut self, paid_nft_account: Pubkey) {
+        self.paid_nft_account_list[self.paid_nft_count as usize] = paid_nft_account;
+        self.paid_nft_count += 1;
+    }
 }
