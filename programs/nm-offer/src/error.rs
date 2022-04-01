@@ -13,4 +13,7 @@ pub enum NMError {
 
     #[msg("Invalid Source Account")]
     InvalidSourceAccount,
+
+    #[msg("Nft Not Putted On Sale")]
+    NotPuttedOnSale,
 }

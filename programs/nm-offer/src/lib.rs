@@ -140,6 +140,8 @@ pub mod nm_offer {
         offer_index: u8,
     ) -> ProgramResult {
 
+        require!(ctx.accounts.nft_on_sale.owner == *ctx.accounts.pool.to_account_info().key, NMError::NotPuttedOnSale);
+
         let offer_data = &mut ctx.accounts.offer_data.load_mut()?;
         require!(offer_index < offer_data.offer_item_count, NMError::OverflowOfferCount);
 
@@ -218,6 +220,48 @@ pub mod nm_offer {
         Ok(())
     }
 
+    pub fn put_token_on_sale(ctx: Context<PutOnSale>,
+        collection_id: u32,
+        nft_id: u32,
+        price: u64) -> ProgramResult {
+
+        let nft_on_sale = &mut ctx.accounts.nft_on_sale;
+        nft_on_sale.owner = *ctx.accounts.owner.key;
+        nft_on_sale.collection_id = collection_id;
+        nft_on_sale.nft_id = nft_id;
+        nft_on_sale.price = price;
+
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.source_account.to_account_info(),
+            to: ctx.accounts.dest_account.to_account_info(),
+            authority: ctx.accounts.owner.to_account_info(),
+        };
+        let transfer_ctx1 = CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
+        token::transfer(
+            transfer_ctx1,
+            1
+        )?;
+
+        Ok(())
+    }
+
+    pub fn cancel_token_from_sale(ctx: Context<CancelFromSale>,global_bump: u8) -> ProgramResult {
+
+        let seeds = &[GLOBAL_AUTHORITY_SEED.as_bytes(), &[global_bump]];
+        let signer = &[&seeds[..]];
+        let cpi_accounts1 = Transfer {
+            from: ctx.accounts.source_account.to_account_info(),
+            to: ctx.accounts.dest_account.to_account_info(),
+            authority: ctx.accounts.pool.to_account_info()
+        };
+        let transfer_ctx2 = CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), cpi_accounts1, signer);
+        token::transfer(
+            transfer_ctx2,
+            1
+        )?;
+
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -302,6 +346,7 @@ pub struct RemoveNft<'info> {
     #[account(mut, signer)]
     owner : AccountInfo<'info>, 
 
+    #[account(mut)]
     pool : Account<'info, Pool>,
 
     #[account(mut, close = receiver)]
@@ -334,11 +379,52 @@ pub struct BuyNftStep<'info> {
     source_account : AccountInfo<'info>,
     dest_account : AccountInfo<'info>,
 
+    nft_on_sale: Account<'info, NftOnSale>,
+
     #[account(mut, close = receiver)]
     nft_data : Account<'info, NftData>,
 
     #[account(mut)]
     pub receiver: SystemAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
+
+    system_program : Program<'info,System>,
+}
+
+#[derive(Accounts)]
+pub struct PutOnSale<'info> {
+    #[account(mut, signer)]
+    owner : AccountInfo<'info>,
+
+    #[account(init, payer = owner)]
+    nft_on_sale: Account<'info, NftOnSale>,
+
+    source_account : AccountInfo<'info>,
+    dest_account : AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+
+    system_program : Program<'info,System>,
+}
+
+
+#[derive(Accounts)]
+pub struct CancelFromSale<'info> {
+    #[account(mut, signer)]
+    owner : AccountInfo<'info>,
+
+    #[account(mut)]
+    pool : Account<'info, Pool>,
+
+    #[account(mut, close = receiver)]
+    nft_on_sale: Account<'info, NftOnSale>,
+
+    #[account(mut)]
+    pub receiver: SystemAccount<'info>,
+
+    source_account : AccountInfo<'info>,
+    dest_account : AccountInfo<'info>,
 
     pub token_program: Program<'info, Token>,
 

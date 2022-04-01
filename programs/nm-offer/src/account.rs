@@ -123,3 +123,12 @@ impl BuyingState {
         self.paid_nft_count += 1;
     }
 }
+
+#[account]
+#[derive(Default)]
+pub struct NftOnSale {
+    pub owner : Pubkey,
+    pub collection_id : u32,
+    pub nft_id : u32,
+    pub price : u64,
+}
